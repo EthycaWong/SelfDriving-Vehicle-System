@@ -1,0 +1,4 @@
+#!/bin/sh
+# The Arduino tools ship an Intel-only ctags, used to generate function prototypes.
+# firmware.ino defines every function before it is used, so it needs none.
+exit 0

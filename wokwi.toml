@@ -1,0 +1,5 @@
+[wokwi]
+version = 1
+firmware = "build/firmware/firmware.ino.bin"
+elf = "build/firmware/firmware.ino.elf"
+rfc2217ServerPort = 4000
