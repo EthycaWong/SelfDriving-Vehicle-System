@@ -358,9 +358,13 @@ void testFailsafeAndRecovery() {
     run.run(5);
     run.visionOn = false;
     CHECK(run.runUntil([&] { return run.planner.state() == DriveState::Failsafe; }, 4));
+    // Something ahead must not hide the fact that a system is down.
+    run.things.push_back({ObjectClass::Person, run.ahead(30, RoadNetwork::shoulderOffset() - 4.5f), 0.6f});
     CHECK(run.runUntil([&] { return run.maneuver.status().phase == "stopped on shoulder"; }, 20));
     run.run(2);
+    CHECK(run.planner.state() == DriveState::Failsafe);
     CHECK(std::abs(run.vehicle.state().speed) < 0.1f);
+    run.things.clear();
     run.visionOn = true;
     run.run(6);
     CHECK(run.planner.state() != DriveState::Failsafe);

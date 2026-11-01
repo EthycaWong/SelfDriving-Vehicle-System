@@ -198,6 +198,8 @@ void Planner::decide(double now) {
         plan.reason = "waiting for vision and board";
     }
 
+    const bool failsafeActive = plan.state == DriveState::Failsafe;
+
     // The front sensor is the emergency stop. It releases at a larger distance so it can't flicker.
     if (hasSensors_) {
         if (sensors_.frontCm < config_.estopCm) estopLatched_ = true;
@@ -287,6 +289,9 @@ void Planner::decide(double now) {
             }
         }
     }
+
+    // Slowing for an obstacle doesn't change the fact that a system is down.
+    if (failsafeActive && plan.state != DriveState::EStop) plan.state = DriveState::Failsafe;
 
     // Moves the car can't reverse out of still need the rear sensor to stay clear.
     if (path_.reverse && sensors_.rearCm < config_.sensorClearCm) {
