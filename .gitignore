@@ -1,0 +1,20 @@
+# Build output
+build/
+spikes/*/build/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Downloaded with tools/fetch_assets.py. These are large and carry third-party licences.
+assets/
+models/
+
+# Captured frames and test output
+spikes/out/
+
+# Wokwi
+*.vcd
+
+.DS_Store
