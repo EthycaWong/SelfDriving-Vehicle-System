@@ -15,6 +15,7 @@ struct VisibleObject {
     Rectangle visibleBox{};    // Pixels of the object that are actually on screen.
     Rectangle projectedBox{};  // Where the whole object would be if nothing blocked it.
     bool fullyInFrame = false;
+    float visibleFraction = 0; // Share of the object's own pixels that nothing covers.
 };
 
 class Renderer {
@@ -46,13 +47,18 @@ private:
     void drawSky(const Scene& scene, const Camera3D& camera);
     void drawGround(const Scene& scene);
     void drawObjects(const Scene& scene, const Camera3D& camera, bool idPass);
+    void drawObject(const Scene& scene, const SceneObject& object, const Camera3D& camera, bool idPass);
+    void drawShadows(const Scene& scene);
     void setIdUniform(int id, bool idPass);
+    void setLit(bool lit);
+    int countPixelsAlone(const Scene& scene, const SceneObject& object, const Camera3D& camera);
 
     int width_;
     int height_;
     Shader shader_{};
     int idColorLoc_ = -1;
     int idModeLoc_ = -1;
+    int litLoc_ = -1;
     RenderTexture2D superTarget_{};
     RenderTexture2D cameraTarget_{};
     RenderTexture2D idTarget_{};
@@ -63,5 +69,7 @@ private:
     Mesh yellowLineMesh_{};
     Mesh skyMesh_{};
     Mesh quadMesh_{};
+    Mesh groundQuadMesh_{};
+    Texture2D shadowTexture_{};
     Material material_{};
 };

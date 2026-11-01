@@ -73,4 +73,5 @@ public:
 private:
     std::vector<float> vertices_;
     std::vector<float> texcoords_;
+    std::vector<float> normals_;
 };

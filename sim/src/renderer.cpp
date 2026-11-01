@@ -16,12 +16,16 @@ const char* kVertexShader = R"(#version 330
 in vec3 vertexPosition;
 in vec2 vertexTexCoord;
 in vec4 vertexColor;
+in vec3 vertexNormal;
 uniform mat4 mvp;
+uniform mat4 matModel;
 out vec2 fragTexCoord;
 out vec4 fragColor;
+out vec3 fragNormal;
 void main() {
     fragTexCoord = vertexTexCoord;
     fragColor = vertexColor;
+    fragNormal = mat3(matModel) * vertexNormal;
     gl_Position = mvp * vec4(vertexPosition, 1.0);
 }
 )";
@@ -29,10 +33,12 @@ void main() {
 const char* kFragmentShader = R"(#version 330
 in vec2 fragTexCoord;
 in vec4 fragColor;
+in vec3 fragNormal;
 uniform sampler2D texture0;
 uniform vec4 colDiffuse;
 uniform vec4 idColor;
 uniform int idMode;
+uniform int lit;
 out vec4 finalColor;
 void main() {
     vec4 texel = texture(texture0, fragTexCoord);
@@ -42,6 +48,10 @@ void main() {
     } else {
         if (texel.a < 0.05) discard;
         finalColor = texel * colDiffuse * fragColor;
+        if (lit == 1) {
+            float facing = 0.5 + 0.5 * dot(normalize(fragNormal), normalize(vec3(0.6, 0.7, 0.4)));
+            finalColor.rgb *= 0.45 + 0.75 * facing;
+        }
     }
 }
 )";
@@ -64,6 +74,7 @@ Renderer::Renderer(int width, int height) : width_(width), height_(height) {
     shader_ = LoadShaderFromMemory(kVertexShader, kFragmentShader);
     idColorLoc_ = GetShaderLocation(shader_, "idColor");
     idModeLoc_ = GetShaderLocation(shader_, "idMode");
+    litLoc_ = GetShaderLocation(shader_, "lit");
     superTarget_ = LoadRenderTexture(width * kSuperSample, height * kSuperSample);
     SetTextureFilter(superTarget_.texture, TEXTURE_FILTER_BILINEAR);
     cameraTarget_ = LoadRenderTexture(width, height);
@@ -73,6 +84,13 @@ Renderer::Renderer(int width, int height) : width_(width), height_(height) {
     material_.shader = shader_;
     skyMesh_ = GenMeshSphere(kFarPlane * 0.8f, 32, 48);
     quadMesh_ = buildUnitQuad();
+    MeshBuilder ground;
+    ground.quad({-0.5f, 0, -0.5f}, {-0.5f, 0, 0.5f}, {0.5f, 0, 0.5f}, {0.5f, 0, -0.5f}, {0, 0}, {0, 1}, {1, 1}, {1, 0});
+    groundQuadMesh_ = ground.build();
+    Image shadow = GenImageGradientRadial(128, 128, 0.0f, Color{0, 0, 0, 170}, Color{0, 0, 0, 0});
+    shadowTexture_ = LoadTextureFromImage(shadow);
+    UnloadImage(shadow);
+    SetTextureFilter(shadowTexture_, TEXTURE_FILTER_BILINEAR);
 }
 
 Renderer::~Renderer() {
@@ -151,6 +169,11 @@ void Renderer::setIdUniform(int id, bool idPass) {
     SetShaderValue(shader_, idColorLoc_, color, SHADER_UNIFORM_VEC4);
 }
 
+void Renderer::setLit(bool lit) {
+    const int value = lit ? 1 : 0;
+    SetShaderValue(shader_, litLoc_, &value, SHADER_UNIFORM_INT);
+}
+
 void Renderer::drawSky(const Scene& scene, const Camera3D& camera) {
     material_.maps[MATERIAL_MAP_DIFFUSE].texture = scene.assets().sky;
     material_.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
@@ -175,75 +198,100 @@ void Renderer::drawGround(const Scene& scene) {
     draw(yellowLineMesh_, assets.white, Color{225, 180, 40, 255});
 }
 
-void Renderer::drawObjects(const Scene& scene, const Camera3D& camera, bool idPass) {
-    const AssetLibrary& assets = scene.assets();
+void Renderer::drawShadows(const Scene& scene) {
+    setLit(false);
+    material_.maps[MATERIAL_MAP_DIFFUSE].texture = shadowTexture_;
+    material_.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+    BeginBlendMode(BLEND_ALPHA);
+    rlDisableDepthMask();
+    for (const SceneObject& object : scene.objects()) {
+        if (object.kind == ObjectKind::Building) continue;
+        if (object.kind == ObjectKind::Cutout &&
+            scene.assets().cutouts[static_cast<size_t>(object.asset)].mountM > 0) continue;
+        const float width = object.boundsMax.x - object.boundsMin.x;
+        const Matrix transform = MatrixMultiply(MatrixScale(width * 1.25f, 1, width * 0.8f),
+                                                MatrixTranslate(object.position.x, 0.03f, object.position.z));
+        DrawMesh(groundQuadMesh_, material_, transform);
+    }
+    rlEnableDepthMask();
+    EndBlendMode();
+}
 
+void Renderer::drawObject(const Scene& scene, const SceneObject& object, const Camera3D& camera, bool idPass) {
+    const AssetLibrary& assets = scene.assets();
+    setIdUniform(object.id, idPass);
+    material_.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+    if (object.kind == ObjectKind::Building) {
+        const BuildingMesh& mesh = scene.buildings()[static_cast<size_t>(object.asset)];
+        setLit(true);
+        material_.maps[MATERIAL_MAP_DIFFUSE].texture = assets.facades[static_cast<size_t>(mesh.facade)];
+        rlDisableBackfaceCulling();
+        DrawMesh(mesh.walls, material_, MatrixIdentity());
+        material_.maps[MATERIAL_MAP_DIFFUSE].texture = assets.sidewalk;
+        material_.maps[MATERIAL_MAP_DIFFUSE].color = Color{120, 120, 120, 255};
+        DrawMesh(mesh.roof, material_, MatrixIdentity());
+        rlEnableBackfaceCulling();
+        return;
+    }
+    if (object.kind == ObjectKind::Model) {
+        setLit(true);
+        const Model& model = assets.models[static_cast<size_t>(object.asset)].model;
+        DrawModelEx(model, object.position, {0, 1, 0}, object.yawDegrees, {object.scale, object.scale, object.scale}, WHITE);
+        return;
+    }
+
+    setLit(false);
+    const CutoutAsset& asset = assets.cutouts[static_cast<size_t>(object.asset)];
+    const float height = asset.heightM * object.scale;
+    const float width = height * asset.aspect;
+    const float base = object.position.y + asset.mountM;
+    const float yaw = std::atan2(camera.position.x - object.position.x, camera.position.z - object.position.z);
+    rlDisableBackfaceCulling();
+    if (asset.mountM > 0) {
+        // The pole is scenery with no ID, so it isn't scored as part of the sign.
+        setIdUniform(0, idPass);
+        material_.maps[MATERIAL_MAP_DIFFUSE].texture = assets.white;
+        material_.maps[MATERIAL_MAP_DIFFUSE].color = Color{90, 92, 95, 255};
+        const Matrix pole = MatrixMultiply(MatrixMultiply(MatrixScale(0.09f, base + height * 0.1f, 1), MatrixRotateY(yaw)),
+                                           MatrixTranslate(object.position.x, object.position.y, object.position.z));
+        DrawMesh(quadMesh_, material_, pole);
+        material_.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+        setIdUniform(object.id, idPass);
+    }
+    material_.maps[MATERIAL_MAP_DIFFUSE].texture = asset.texture;
+    const Matrix transform = MatrixMultiply(MatrixMultiply(MatrixScale(width, height, 1), MatrixRotateY(yaw)),
+                                            MatrixTranslate(object.position.x, base, object.position.z));
+    DrawMesh(quadMesh_, material_, transform);
+    rlEnableBackfaceCulling();
+}
+
+void Renderer::drawObjects(const Scene& scene, const Camera3D& camera, bool idPass) {
     // Solid things first, then cutouts from far to near so their soft edges blend correctly.
     std::vector<const SceneObject*> cutouts;
     for (const SceneObject& object : scene.objects()) {
-        setIdUniform(object.id, idPass);
-        if (object.kind == ObjectKind::Building) {
-            const BuildingMesh& mesh = scene.buildings()[static_cast<size_t>(object.asset)];
-            material_.maps[MATERIAL_MAP_DIFFUSE].texture = assets.facades[static_cast<size_t>(mesh.facade)];
-            material_.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-            rlDisableBackfaceCulling();
-            DrawMesh(mesh.walls, material_, MatrixIdentity());
-            material_.maps[MATERIAL_MAP_DIFFUSE].texture = assets.sidewalk;
-            material_.maps[MATERIAL_MAP_DIFFUSE].color = Color{120, 120, 120, 255};
-            DrawMesh(mesh.roof, material_, MatrixIdentity());
-            rlEnableBackfaceCulling();
-        } else if (object.kind == ObjectKind::Model) {
-            const Model& model = assets.models[static_cast<size_t>(object.asset)].model;
-            DrawModelEx(model, object.position, {0, 1, 0}, object.yawDegrees,
-                        {object.scale, object.scale, object.scale}, WHITE);
-        } else {
+        if (object.kind == ObjectKind::Cutout) {
             cutouts.push_back(&object);
+        } else {
+            drawObject(scene, object, camera, idPass);
         }
     }
-
     std::sort(cutouts.begin(), cutouts.end(), [&](const SceneObject* a, const SceneObject* b) {
         return Vector3DistanceSqr(a->position, camera.position) > Vector3DistanceSqr(b->position, camera.position);
     });
-
-    rlDisableBackfaceCulling();
     if (!idPass) BeginBlendMode(BLEND_ALPHA);
-    for (const SceneObject* object : cutouts) {
-        const CutoutAsset& asset = assets.cutouts[static_cast<size_t>(object->asset)];
-        const float height = asset.heightM * object->scale;
-        const float width = height * asset.aspect;
-        const float base = object->position.y + asset.mountM;
-
-        material_.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-        if (asset.mountM > 0) {
-            // The pole is scenery with no ID, so it isn't scored as part of the sign.
-            setIdUniform(0, idPass);
-            material_.maps[MATERIAL_MAP_DIFFUSE].texture = assets.white;
-            material_.maps[MATERIAL_MAP_DIFFUSE].color = Color{90, 92, 95, 255};
-            const float yaw = std::atan2(camera.position.x - object->position.x,
-                                         camera.position.z - object->position.z);
-            const Matrix pole = MatrixMultiply(MatrixMultiply(MatrixScale(0.09f, base + height * 0.1f, 1), MatrixRotateY(yaw)),
-                                               MatrixTranslate(object->position.x, object->position.y, object->position.z));
-            DrawMesh(quadMesh_, material_, pole);
-            material_.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
-        }
-
-        setIdUniform(object->id, idPass);
-        material_.maps[MATERIAL_MAP_DIFFUSE].texture = asset.texture;
-        const float yaw = std::atan2(camera.position.x - object->position.x, camera.position.z - object->position.z);
-        const Matrix transform = MatrixMultiply(MatrixMultiply(MatrixScale(width, height, 1), MatrixRotateY(yaw)),
-                                                MatrixTranslate(object->position.x, base, object->position.z));
-        DrawMesh(quadMesh_, material_, transform);
-    }
+    for (const SceneObject* object : cutouts) drawObject(scene, *object, camera, idPass);
     if (!idPass) EndBlendMode();
-    rlEnableBackfaceCulling();
+    setLit(false);
 }
 
 void Renderer::drawWorld(const Scene& scene, const Camera3D& camera) {
     rlSetClipPlanes(0.1, kFarPlane);
     BeginMode3D(camera);
     setIdUniform(0, false);
+    setLit(false);
     drawSky(scene, camera);
     drawGround(scene);
+    drawShadows(scene);
     drawObjects(scene, camera, false);
     EndMode3D();
 }
@@ -255,11 +303,18 @@ void Renderer::renderCamera(const Scene& scene, const Camera3D& camera) {
     EndTextureMode();
 
     // Averaging the larger image down keeps cutout and building edges from looking jagged.
+    // Copied with blending off. Soft shadows leave the large image's alpha below 1, and blending
+    // would let the previous frame show through as ghost objects.
     BeginTextureMode(cameraTarget_);
+    ClearBackground(BLACK);
+    BeginBlendMode(BLEND_CUSTOM);
+    rlSetBlendFactors(RL_ONE, RL_ZERO, RL_FUNC_ADD);
+    rlSetBlendMode(RL_BLEND_CUSTOM);
     const Rectangle source{0, 0, static_cast<float>(superTarget_.texture.width),
                            -static_cast<float>(superTarget_.texture.height)};
     DrawTexturePro(superTarget_.texture, source, {0, 0, static_cast<float>(width_), static_cast<float>(height_)},
                    {0, 0}, 0, WHITE);
+    EndBlendMode();
     EndTextureMode();
 }
 
@@ -267,6 +322,26 @@ Image Renderer::readCameraPixels() const {
     Image image = LoadImageFromTexture(cameraTarget_.texture);
     ImageFlipVertical(&image);
     return image;
+}
+
+int Renderer::countPixelsAlone(const Scene& scene, const SceneObject& object, const Camera3D& camera) {
+    BeginTextureMode(idTarget_);
+    ClearBackground(BLANK);
+    rlSetClipPlanes(0.1, kFarPlane);
+    BeginMode3D(camera);
+    drawObject(scene, object, camera, true);
+    EndMode3D();
+    EndTextureMode();
+    Image image = LoadImageFromTexture(idTarget_.texture);
+    Color* pixels = LoadImageColors(image);
+    int count = 0;
+    const int wanted = object.id;
+    for (int i = 0; i < image.width * image.height; ++i) {
+        if (pixels[i].a != 0 && pixels[i].b == 200 && (pixels[i].r | (pixels[i].g << 8)) == wanted) ++count;
+    }
+    UnloadImageColors(pixels);
+    UnloadImage(image);
+    return count;
 }
 
 std::vector<VisibleObject> Renderer::renderGroundTruth(const Scene& scene, const Camera3D& camera) {
@@ -348,5 +423,15 @@ std::vector<VisibleObject> Renderer::renderGroundTruth(const Scene& scene, const
                                maxY < static_cast<float>(height_);
         result.push_back(visible);
     }
+    // Rendering is only repeated for countable objects. A building or tree has no single meaningful
+    // silhouette here because it's usually partly out of frame.
+    for (VisibleObject& visible : result) {
+        visible.visibleFraction = 1.0f;
+        if (visible.cls == ObjectClass::Tree || visible.cls == ObjectClass::Building) continue;
+        if (visible.distance > 40.0f) continue;
+        const int alone = countPixelsAlone(scene, *scene.find(visible.id), camera);
+        visible.visibleFraction = alone > 0 ? static_cast<float>(visible.visiblePixels) / static_cast<float>(alone) : 0.0f;
+    }
+    setIdUniform(0, false);
     return result;
 }

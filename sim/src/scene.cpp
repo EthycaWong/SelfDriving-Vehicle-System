@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <raymath.h>
+
 namespace {
 
 constexpr float kFloorHeight = 3.5f;
@@ -27,6 +29,10 @@ void MeshBuilder::quad(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector2 uvA, 
     for (const Vector2& t : {uvA, uvB, uvC, uvA, uvC, uvD}) {
         texcoords_.insert(texcoords_.end(), {t.x, t.y});
     }
+    const Vector3 normal = Vector3Normalize(Vector3CrossProduct(Vector3Subtract(b, a), Vector3Subtract(c, a)));
+    for (int i = 0; i < 6; ++i) {
+        normals_.insert(normals_.end(), {normal.x, normal.y, normal.z});
+    }
 }
 
 void MeshBuilder::groundRect(float x0, float z0, float x1, float z1, float y, float tile) {
@@ -40,6 +46,7 @@ Mesh MeshBuilder::build() {
     mesh.triangleCount = mesh.vertexCount / 3;
     mesh.vertices = copyToRaylib(vertices_);
     mesh.texcoords = copyToRaylib(texcoords_);
+    mesh.normals = copyToRaylib(normals_);
     UploadMesh(&mesh, false);
     return mesh;
 }

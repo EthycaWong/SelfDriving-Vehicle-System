@@ -1,0 +1,10 @@
+class             objects   hits   recall  precision  orig. rule   recall by distance (0-10/10-20/20-30 m)
+person                 72     72     100%        49%        100%   100% (8) / 100% (29) / 100% (35)
+animal                 79     47      59%        91%         55%   90% (10) / 67% (33) / 44% (36)
+vehicle                83     83     100%        88%        100%   100% (8) / 100% (35) / 100% (40)
+traffic_control        48     30      62%        66%         61%   - / 83% (18) / 50% (30)
+tree                  319    284      89%        81%         89%   84% (75) / 89% (113) / 92% (131)
+building              374    360      96%        81%         96%   - / 94% (246) / 100% (128)
+obstruction            55     33      60%        47%         55%   100% (2) / 64% (25) / 54% (28)
+median time: detector 83 ms, segmenter 151 ms
+TARGET NOT MET

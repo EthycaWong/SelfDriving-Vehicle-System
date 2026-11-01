@@ -5,7 +5,7 @@ The rules were fixed before the first run, and the classifier only ever receives
 
 Which objects count (within 30 m):
   - person, animal, vehicle, traffic_control, obstruction: wholly in frame, with at least 60% of
-    the projected box visible and at least 100 visible pixels.
+    the object's own pixels visible and at least 100 visible pixels.
   - tree, building: at least 1500 visible pixels. These are often partly out of frame or hidden.
 
 What counts as a hit (a detection of the same class):
@@ -14,6 +14,11 @@ What counts as a hit (a detection of the same class):
     can span several neighbouring trees or buildings.
 
 The target is at least 70% recall per class. Precision is reported but isn't part of the target.
+
+Rule change after the first run: visibility was first measured as the visible box against the
+projected box. A sign behind a tree still passed that test if a few corner pixels showed, even with
+most of it hidden by leaves, so it's now measured in pixels. The original rule is still computed
+and printed next to the current one, so the effect of the change can be seen.
 """
 import argparse
 import json
@@ -50,6 +55,14 @@ def counts(obj):
         return False
     if obj["class"] in REGION_CLASSES:
         return obj["visible_px"] >= 1500
+    return obj["in_frame"] and obj["visible_px"] >= 100 and obj["visible_fraction"] >= 0.6
+
+
+def counts_original_rule(obj):
+    if obj["distance"] > MAX_DISTANCE:
+        return False
+    if obj["class"] in REGION_CLASSES:
+        return obj["visible_px"] >= 1500
     projected = box_area(obj["projected"])
     return (obj["in_frame"] and obj["visible_px"] >= 100
             and projected > 0 and box_area(obj["box"]) / projected >= 0.6)
@@ -76,6 +89,7 @@ def main():
     classifier = Classifier(args.models)
     totals = {c: {"objects": 0, "hits": 0, "detections": 0, "matched": 0} for c in CLASSES}
     by_distance = {c: {} for c in CLASSES}
+    original = {c: [0, 0] for c in CLASSES}
     detector_ms, segmenter_ms = [], []
     annotated = args.frames / "annotated"
     annotated.mkdir(exist_ok=True)
@@ -88,6 +102,9 @@ def main():
         segmenter_ms.append(result.segmenter_ms)
 
         for obj in record["objects"]:
+            if counts_original_rule(obj):
+                original[obj["class"]][0] += 1
+                original[obj["class"]][1] += any(is_hit(obj, d) for d in result.detections)
             if not counts(obj):
                 continue
             hit = any(is_hit(obj, d) for d in result.detections)
@@ -113,7 +130,7 @@ def main():
             cv2.imwrite(str(annotated / record["frame"]), view)
 
     report = {"target_recall": TARGET_RECALL, "max_distance_m": MAX_DISTANCE, "classes": {}}
-    print(f"{'class':<17}{'objects':>8}{'hits':>7}{'recall':>9}{'precision':>11}   recall by distance (0-10/10-20/20-30 m)")
+    print(f"{'class':<17}{'objects':>8}{'hits':>7}{'recall':>9}{'precision':>11}{'orig. rule':>12}   recall by distance (0-10/10-20/20-30 m)")
     passed = True
     for cls in CLASSES:
         t = totals[cls]
@@ -124,9 +141,11 @@ def main():
             for b in (0, 10, 20))
         recall_text = f"{recall:.0%}" if recall is not None else "n/a"
         precision_text = f"{precision:.0%}" if precision is not None else "n/a"
-        print(f"{cls:<17}{t['objects']:>8}{t['hits']:>7}{recall_text:>9}{precision_text:>11}   {bands}")
+        orig = original[cls]
+        orig_text = f"{orig[1] / orig[0]:.0%}" if orig[0] else "n/a"
+        print(f"{cls:<17}{t['objects']:>8}{t['hits']:>7}{recall_text:>9}{precision_text:>11}{orig_text:>12}   {bands}")
         passed &= recall is not None and recall >= TARGET_RECALL
-        report["classes"][cls] = {**t, "recall": recall, "precision": precision}
+        report["classes"][cls] = {**t, "recall": recall, "precision": precision, "original_rule_recall": orig[1] / orig[0] if orig[0] else None}
 
     detector_ms.sort()
     segmenter_ms.sort()

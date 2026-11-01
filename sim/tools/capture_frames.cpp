@@ -1,7 +1,7 @@
 // Renders a fixed drive down one road and writes frames plus ground truth, so the classifier can
 // be scored on exactly what the simulation shows.
 //
-// Usage: capture_frames <project root> <output folder> [frame count]
+// Usage: capture_frames <project root> <output folder> [frame count] [seed]
 #include <raylib.h>
 
 #include <cstdio>
@@ -23,8 +23,8 @@ constexpr float kCameraFovY = 40.0f;
 
 // Lays out test objects along the road at row 1, travelling east. Each class gets the same share
 // and a mix of positions: in the driving lane, in other lanes, on the shoulder and on the sidewalk.
-void placeTestObjects(Scene& scene, const AssetLibrary& assets, float zRoad, float xStart, float xEnd) {
-    std::mt19937 rng(2024);
+void placeTestObjects(Scene& scene, const AssetLibrary& assets, float zRoad, float xStart, float xEnd, unsigned seed) {
+    std::mt19937 rng(seed);
     const auto pickFrom = [&](const std::vector<int>& list) {
         return list[std::uniform_int_distribution<size_t>(0, list.size() - 1)(rng)];
     };
@@ -93,6 +93,7 @@ int main(int argc, char** argv) {
     const std::string root = argv[1];
     const std::filesystem::path out = argv[2];
     const int frames = argc > 3 ? std::stoi(argv[3]) : 200;
+    const unsigned seed = argc > 4 ? static_cast<unsigned>(std::stoul(argv[4])) : 7;
     std::filesystem::create_directories(out);
 
     SetConfigFlags(FLAG_WINDOW_HIDDEN);
@@ -104,11 +105,11 @@ int main(int argc, char** argv) {
     if (!assets.load(root, renderer.shader())) return 1;
 
     RoadNetwork roads(4, 3, 130.0f);
-    Scene scene(roads, assets, 7);
+    Scene scene(roads, assets, seed);
     scene.populateStreets();
     const float zRoad = roads.node(0, 1).y;
     const float xEnd = roads.width();
-    placeTestObjects(scene, assets, zRoad, 20.0f, xEnd - 20.0f);
+    placeTestObjects(scene, assets, zRoad, 20.0f, xEnd - 20.0f, seed + 1);
     renderer.buildStatic(scene);
 
     Camera3D camera{};
@@ -142,7 +143,8 @@ int main(int argc, char** argv) {
                   << "\",\"distance\":" << v.distance << ",\"visible_px\":" << v.visiblePixels
                   << ",\"box\":" << rectJson(v.visibleBox, a, sizeof(a))
                   << ",\"projected\":" << rectJson(v.projectedBox, b, sizeof(b))
-                  << ",\"in_frame\":" << (v.fullyInFrame ? "true" : "false") << "}";
+                  << ",\"in_frame\":" << (v.fullyInFrame ? "true" : "false")
+                  << ",\"visible_fraction\":" << v.visibleFraction << "}";
         }
         truth << "]}\n";
     }

@@ -204,6 +204,18 @@ def fetch_texture(name):
     download(files["Diffuse"]["1k"]["jpg"]["url"], ASSETS / "textures" / f"{name}.jpg")
 
 
+def convert_jpegs_to_png():
+    """Homebrew's raylib is built without JPG support, so textures and model references become PNG."""
+    for jpeg in list((ASSETS / "textures").glob("*.jpg")) + list((ASSETS / "models").glob("*/textures/*.jpg")):
+        png = jpeg.with_suffix(".png")
+        if not png.exists():
+            cv2.imwrite(str(png), cv2.imread(str(jpeg)))
+    for gltf in (ASSETS / "models").glob("*/*.gltf"):
+        text = gltf.read_text()
+        if ".jpg" in text:
+            gltf.write_text(text.replace(".jpg", ".png"))
+
+
 def make_facades():
     """Builds one-storey wall tiles with windows from the brick textures. A tile is 7 m by 3.5 m."""
     sources = ["brick_wall_02", "brick_wall_09", "sandstone_brick_wall_01", "concrete_tile_facade"]
@@ -225,12 +237,24 @@ def make_facades():
         cv2.imwrite(str(ASSETS / "textures" / f"facade_{number}.png"), wall)
 
 
+def fetch_vision_models():
+    models = ROOT / "models"
+    download(
+        "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/latest/efficientdet_lite0.tflite",
+        models / "efficientdet_lite0.tflite",
+    )
+    segformer = "https://huggingface.co/Xenova/segformer-b0-finetuned-ade-512-512"
+    download(f"{segformer}/resolve/main/onnx/model.onnx", models / "segformer_b0_ade.onnx")
+    download(f"{segformer}/raw/main/config.json", models / "segformer_config.json")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-coco", action="store_true")
     parser.add_argument("--skip-polyhaven", action="store_true")
     args = parser.parse_args()
 
+    fetch_vision_models()
     if not args.skip_polyhaven:
         print("Poly Haven:")
         for name in POLYHAVEN_MODELS:
@@ -240,6 +264,7 @@ def main():
         sky = fetch_json(f"https://api.polyhaven.com/files/{POLYHAVEN_SKY}")
         download(sky["tonemapped"]["url"], ASSETS / "textures" / "sky.jpg")
         make_facades()
+        convert_jpegs_to_png()
     if not args.skip_coco:
         print("COCO:")
         fetch_cutouts(load_coco())

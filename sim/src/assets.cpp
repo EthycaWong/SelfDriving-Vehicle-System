@@ -94,10 +94,10 @@ bool AssetLibrary::load(const std::string& root, Shader shader) {
     for (int i = 0; i < 4; ++i) {
         facades.push_back(loadTiled(root + "/assets/textures/facade_" + std::to_string(i) + ".png"));
     }
-    asphalt = loadTiled(root + "/assets/textures/asphalt_02.jpg");
-    sidewalk = loadTiled(root + "/assets/textures/concrete_pavement.jpg");
-    grass = loadTiled(root + "/assets/textures/sparse_grass.jpg");
-    sky = LoadTexture((root + "/assets/textures/sky.jpg").c_str());
+    asphalt = loadTiled(root + "/assets/textures/asphalt_02.png");
+    sidewalk = loadTiled(root + "/assets/textures/concrete_pavement.png");
+    grass = loadTiled(root + "/assets/textures/sparse_grass.png");
+    sky = LoadTexture((root + "/assets/textures/sky.png").c_str());
     SetTextureFilter(sky, TEXTURE_FILTER_BILINEAR);
     Image pixel = GenImageColor(1, 1, WHITE);
     white = LoadTextureFromImage(pixel);
