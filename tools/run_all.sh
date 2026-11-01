@@ -26,7 +26,7 @@ if [ "$MOCK" = 1 ]; then
 fi
 
 READY="$(mktemp)"
-(cd "$ROOT/vision" && "$PY" vision_server.py) >"$READY" 2>/dev/null &
+(cd "$ROOT/vision" && exec "$PY" vision_server.py) >"$READY" 2>/dev/null &
 VISION=$!
 echo "Loading the classifier..."
 until grep -q ready "$READY"; do

@@ -174,7 +174,7 @@ int main(int argc, char** argv) {
     const Options options = parseOptions(argc, argv);
 
     if (options.hidden) SetConfigFlags(FLAG_WINDOW_HIDDEN);
-    SetTraceLogLevel(LOG_WARNING);
+    SetTraceLogLevel(LOG_ERROR);
     InitWindow(kWindowWidth, kWindowHeight, "SelfDrive");
     SetTargetFPS(30);
 
